@@ -25,6 +25,30 @@ from src.utils import setup_logging, ensure_directory
 from src.resistance_detection import SampleResistanceProfile, ResistanceStatus
 
 
+# Columns of the ``samples`` table (see initialize_database / get_schema_sql).
+# Column names cannot be bound as SQL parameters, so any caller-supplied
+# field name must be validated against this whitelist before being placed
+# into a query string.
+SAMPLE_COLUMNS = frozenset({
+    'sample_id',
+    'collection_date',
+    'location',
+    'country',
+    'region',
+    'latitude',
+    'longitude',
+    'patient_age',
+    'patient_sex',
+    'parasitemia',
+    'sequencing_date',
+    'sequencing_platform',
+    'read_count',
+    'mean_coverage',
+    'created_at',
+    'updated_at',
+})
+
+
 # =============================================================================
 # DATABASE MANAGER CLASS
 # =============================================================================
@@ -222,7 +246,13 @@ class DatabaseManager:
         collection_date : str, optional
             Collection date (YYYY-MM-DD)
         **kwargs : dict
-            Additional sample metadata
+            Additional sample metadata. Keys must be columns of the
+            ``samples`` table (see ``SAMPLE_COLUMNS``).
+        
+        Raises
+        ------
+        ValueError
+            If a keyword argument is not a valid ``samples`` column.
         """
         with self.get_connection() as conn:
             cursor = conn.cursor()
@@ -244,10 +274,16 @@ class DatabaseManager:
             
             for key, value in kwargs.items():
                 if value is not None:
+                    # Column names are interpolated into the SQL text, so
+                    # only allow known columns from the samples schema.
+                    if key not in SAMPLE_COLUMNS or key in fields:
+                        raise ValueError(f"Invalid sample field: {key!r}")
                     fields.append(key)
                     values.append(value)
                     placeholders.append('?')
             
+            # All identifiers in `fields` come from SAMPLE_COLUMNS; all
+            # values are passed separately as bound parameters.
             query = f'''
                 INSERT OR REPLACE INTO samples ({', '.join(fields)})
                 VALUES ({', '.join(placeholders)})
